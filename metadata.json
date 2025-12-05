@@ -1,0 +1,7 @@
+{
+  "name": "Macaron Blossom Collector",
+  "description": "An interactive generative art experience where a fractal tree blooms in macaron colors when it sees you. Use your hand to pick flowers and fill your basket.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
