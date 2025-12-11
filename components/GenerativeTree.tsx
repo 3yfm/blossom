@@ -86,7 +86,6 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
       let parts: Particle[] = [];
       let treePositions: {x: number, y: number}[] = [];
       let prevIndexPos: p5.Vector | null = null;
-      let fingerStillFrames = 0;
       let wandPos: p5.Vector | null = null; // Wand position tracking
       
       // Offscreen graphics buffer for the persistent tree trails
@@ -179,14 +178,14 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
                  let diff = this.interactionRotation - this.currentRotation;
                  while (diff < -p.PI) diff += p.TWO_PI;
                  while (diff > p.PI) diff -= p.TWO_PI;
-                 this.currentRotation += diff * 0.1; 
+                 this.currentRotation += diff * 0.15; // Slightly faster reaction for shake
 
              } else {
                  if (this.isBloomed) {
                     // Stay big if already bloomed
                     this.targetScale = 2.5;
                  } else {
-                    // Return to normal
+                    // Return to normal (only if not bloomed yet)
                     this.targetScale = 1;
                     this.currentRotation = p.lerp(this.currentRotation, this.rotationOffset, 0.05);
                  }
@@ -511,27 +510,22 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
             // Heuristic: Index is significantly further than others
             const isPointing = (dIndex > dMiddle * 1.1) && (dIndex > dRing * 1.1) && (dIndex > dPinky * 1.1);
 
-            // 2. Is Still?
-            const isStill = velocity < 3; // Threshold for stillness
-            
-            if (isStill) {
-              fingerStillFrames++;
-            } else {
-              fingerStillFrames = 0;
-            }
+            let interacted = false;
 
             // --- INTERACTION LOGIC ---
 
-            if (isPointing && fingerStillFrames > 10) {
-               // INTERACTION: STILL FINGER -> MAGNIFY & ROTATE
-               // Find closest flower
-               let closestDist = 50; 
+            if (isPointing) {
+               // 1. Check for interaction with existing flowers first
+               // Increased sensitivity radius to catch shake/rotation
+               let closestDist = 60; 
                let closestFlower: Particle | null = null;
                
                const wx = (1 - wrist.x) * p.width;
                const wy = wrist.y * p.height;
+               // Finger angle relative to wrist
                const fingerAngle = p.atan2(y - wy, x - wx);
 
+               // Find closest flower
                for (const part of parts) {
                    if (part.tag === ParticleType.FLOWER) {
                        const d = p.dist(x, y, part.pos.x, part.pos.y);
@@ -543,12 +537,17 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
                }
 
                if (closestFlower) {
+                   // INTERACTION: ROTATE / SHAKE / BLOOM
+                   // If we found a flower close to the finger, lock onto it.
                    closestFlower.lastHoveredTime = p.millis();
                    closestFlower.interactionRotation = fingerAngle;
+                   interacted = true;
                }
-
-            } else {
+            } 
+            
+            if (!interacted) {
                // INTERACTION: MOVING HAND -> PAINT FLOWERS
+               // Only paint if velocity suggests intentional movement
                if (treePositions.length > 0 && prevIndexPos) {
                    const steps = Math.ceil(velocity / 10);
                    for (let s = 0; s <= steps; s++) {
@@ -573,7 +572,6 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
          } else {
             prevIndexPos = null;
             wandPos = null;
-            fingerStillFrames = 0;
          }
       }
     };
