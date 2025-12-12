@@ -24,7 +24,7 @@ const App: React.FC = () => {
         <header className="flex justify-between items-start pointer-events-auto">
           <div className="bg-white/80 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-pink-100 max-w-md">
             <h1 className="text-2xl font-bold text-gray-800 mb-1 font-serif">
-              Macaron <span className="text-[#FFB7B2]">Blossom</span>
+              Magic <span className="text-[#FFB7B2]">Blossom</span>
             </h1>
             <p className="text-sm text-gray-600">
               Move your hand to paint with flowers.

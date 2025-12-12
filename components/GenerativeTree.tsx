@@ -27,7 +27,7 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
             delegate: "GPU"
           },
           runningMode: "VIDEO",
-          numHands: 1 // Strictly only one hand/wand
+          numHands: 2 // Allow 2 hands for the 10-finger gesture
         });
         
         // Start Camera
@@ -54,7 +54,7 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
                 delegate: "CPU"
               },
               runningMode: "VIDEO",
-              numHands: 1
+              numHands: 2
             });
             console.log("Fallback to CPU delegate successful");
         } catch (retryErr) {
@@ -87,6 +87,7 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
       let treePositions: {x: number, y: number}[] = [];
       let prevIndexPos: p5.Vector | null = null;
       let wandPos: p5.Vector | null = null; // Wand position tracking
+      let isAutoRotating = false; // Global rotation state
       
       // Offscreen graphics buffer for the persistent tree trails
       let treeLayer: p5.Graphics;
@@ -170,7 +171,7 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
              const timeSinceHover = p.millis() - this.lastHoveredTime;
              
              if (timeSinceHover < 200) {
-                 // Is being hovered/interacted with
+                 // Is being hovered/interacted with (Single Finger Point)
                  this.targetScale = 2.5; // Big magnification
                  this.isBloomed = true;
                  
@@ -181,9 +182,15 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
                  this.currentRotation += diff * 0.15; // Slightly faster reaction for shake
 
              } else {
-                 if (this.isBloomed) {
+                 if (isAutoRotating) {
+                    // Global Rotation Trigger (10 Fingers)
+                    this.targetScale = 2.5; // Bloom
+                    this.isBloomed = true;
+                    this.currentRotation += 0.05; // Spin continuously
+                 } else if (this.isBloomed) {
                     // Stay big if already bloomed
                     this.targetScale = 2.5;
+                    // Stop rotating, hold position
                  } else {
                     // Return to normal (only if not bloomed yet)
                     this.targetScale = 1;
@@ -287,6 +294,26 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
              target.fill(this.col);
              const petalSize = this.asiz * this.siz; 
              
+             // Flower Outline (Dotted)
+             if (target === p) {
+                // @ts-ignore
+                if (target.drawingContext && target.drawingContext.setLineDash) {
+                   target.stroke(this.stamenCol);
+                   target.strokeWeight(1);
+                   // @ts-ignore
+                   target.drawingContext.setLineDash([2, 3]);
+                   
+                   for(let i = 0; i < 5; i++) {
+                      target.ellipse(0, petalSize * 0.35, petalSize * 0.6, petalSize);
+                      target.rotate(p.TWO_PI / 5);
+                   }
+                   
+                   target.noStroke();
+                   // @ts-ignore
+                   target.drawingContext.setLineDash([]);
+                }
+             }
+
              for(let i = 0; i < 5; i++) {
                 target.ellipse(0, petalSize * 0.35, petalSize * 0.6, petalSize);
                 target.rotate(p.TWO_PI / 5);
@@ -351,10 +378,15 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
         }
       }
 
-      function spawnFlower(x: number, y: number, handScreenSizeRatio: number = 0.1) {
+      function spawnFlower(x: number, y: number, handScreenSizeRatio: number = 0.1, forceSmall: boolean = false) {
           const flowerColor = p.random(PALETTE.flowers);
           // Map hand size to flower size: Far (Small) -> Close (Big)
-          const size = p.map(handScreenSizeRatio, 0.05, 0.3, 10, 35, true); 
+          let size;
+          if (forceSmall) {
+             size = p.random(8, 12); // Small fixed range for open hand painting
+          } else {
+             size = p.map(handScreenSizeRatio, 0.05, 0.3, 10, 35, true); 
+          }
           parts.push(new Particle(x, y, flowerColor, size, 0, 0, 0, ParticleType.FLOWER));
       }
 
@@ -399,6 +431,44 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
           p.circle(0, 0, 6);
 
           p.pop();
+      }
+
+      function isHandOpen(landmarks: any[]) {
+          const wrist = landmarks[0];
+          let extendedCount = 0;
+          
+          // Fingers Indices (Tip, PIP)
+          const fingerTips = [8, 12, 16, 20];
+          const fingerPips = [6, 10, 14, 18];
+          
+          for(let i=0; i<4; i++) {
+              const dTip = p.dist(wrist.x, wrist.y, landmarks[fingerTips[i]].x, landmarks[fingerTips[i]].y);
+              const dPip = p.dist(wrist.x, wrist.y, landmarks[fingerPips[i]].x, landmarks[fingerPips[i]].y);
+              if (dTip > dPip * 1.1) extendedCount++;
+          }
+          
+          // Thumb Check (Tip vs IP)
+          const dThumbTip = p.dist(wrist.x, wrist.y, landmarks[4].x, landmarks[4].y);
+          const dThumbIP = p.dist(wrist.x, wrist.y, landmarks[3].x, landmarks[3].y);
+          if (dThumbTip > dThumbIP * 1.05) extendedCount++;
+
+          return extendedCount === 5;
+      }
+
+      function isHandFist(landmarks: any[]) {
+          const wrist = landmarks[0];
+          let curledCount = 0;
+          // Check Fingers 2-5
+          const fingerTips = [8, 12, 16, 20];
+          const fingerPips = [6, 10, 14, 18];
+          
+          for(let i=0; i<4; i++) {
+              const dTip = p.dist(wrist.x, wrist.y, landmarks[fingerTips[i]].x, landmarks[fingerTips[i]].y);
+              const dPip = p.dist(wrist.x, wrist.y, landmarks[fingerPips[i]].x, landmarks[fingerPips[i]].y);
+              // If tip is closer to wrist than PIP -> Curled
+              if (dTip < dPip) curledCount++;
+          }
+          return curledCount >= 4;
       }
 
       p.draw = () => {
@@ -458,7 +528,6 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
         }
 
         // 3. Draw Magic Wand ON TOP of everything
-        // Because we use image(treeLayer), the previous wand position is cleared, preventing trails.
         if (wandPos) {
            drawWand(wandPos);
         }
@@ -466,6 +535,7 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
 
       function handleHandInteraction(result: HandLandmarkerResult) {
          if (result.landmarks && result.landmarks.length > 0) {
+            // Wand Logic (Primary Hand)
             const landmarks = result.landmarks[0];
             const indexTip = landmarks[8];
             const wrist = landmarks[0];
@@ -489,7 +559,6 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
                 (1 - wrist.x) * p.width, wrist.y * p.height,
                 (1 - indexBase.x) * p.width, indexBase.y * p.height
             );
-            // Rough diagonal of screen
             const screenDiag = p.dist(0, 0, p.width, p.height);
             const handScreenSizeRatio = handSizePixels / screenDiag; 
 
@@ -500,15 +569,22 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
             }
 
             // --- GESTURE DETECTION ---
-            
-            // 1. Is Pointing? (Index extended, others closer to wrist than index)
-            const dIndex = p.dist(wrist.x, wrist.y, landmarks[8].x, landmarks[8].y);
-            const dMiddle = p.dist(wrist.x, wrist.y, landmarks[12].x, landmarks[12].y);
-            const dRing = p.dist(wrist.x, wrist.y, landmarks[16].x, landmarks[16].y);
-            const dPinky = p.dist(wrist.x, wrist.y, landmarks[20].x, landmarks[20].y);
-            
-            // Heuristic: Index is significantly further than others
-            const isPointing = (dIndex > dMiddle * 1.1) && (dIndex > dRing * 1.1) && (dIndex > dPinky * 1.1);
+            const isPointing = (p.dist(wrist.x, wrist.y, landmarks[8].x, landmarks[8].y) > p.dist(wrist.x, wrist.y, landmarks[12].x, landmarks[12].y) * 1.1) &&
+                               (p.dist(wrist.x, wrist.y, landmarks[8].x, landmarks[8].y) > p.dist(wrist.x, wrist.y, landmarks[16].x, landmarks[16].y) * 1.1) &&
+                               (p.dist(wrist.x, wrist.y, landmarks[8].x, landmarks[8].y) > p.dist(wrist.x, wrist.y, landmarks[20].x, landmarks[20].y) * 1.1);
+
+            const isPrimaryOpen = isHandOpen(landmarks);
+
+            // 2. Global Rotation Triggers (Check ALL hands)
+            let openHands = 0;
+            let fists = 0;
+            for (const hand of result.landmarks) {
+                if (isHandOpen(hand)) openHands++;
+                if (isHandFist(hand)) fists++;
+            }
+
+            if (openHands >= 2) isAutoRotating = true;
+            if (fists > 0) isAutoRotating = false;
 
             let interacted = false;
 
@@ -516,7 +592,6 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
 
             if (isPointing) {
                // 1. Check for interaction with existing flowers first
-               // Increased sensitivity radius to catch shake/rotation
                let closestDist = 60; 
                let closestFlower: Particle | null = null;
                
@@ -537,8 +612,7 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
                }
 
                if (closestFlower) {
-                   // INTERACTION: ROTATE / SHAKE / BLOOM
-                   // If we found a flower close to the finger, lock onto it.
+                   // INTERACTION: ROTATE / SHAKE / BLOOM (Single Flower)
                    closestFlower.lastHoveredTime = p.millis();
                    closestFlower.interactionRotation = fingerAngle;
                    interacted = true;
@@ -549,6 +623,9 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
                // INTERACTION: MOVING HAND -> PAINT FLOWERS
                // Only paint if velocity suggests intentional movement
                if (treePositions.length > 0 && prevIndexPos) {
+                   // If hand is Open, force small flowers. Else use dynamic size.
+                   const forceSmall = isPrimaryOpen;
+                   
                    const steps = Math.ceil(velocity / 10);
                    for (let s = 0; s <= steps; s++) {
                        const lx = p.lerp(prevIndexPos.x, x, s/steps);
@@ -559,7 +636,7 @@ export const GenerativeTree: React.FC<GenerativeTreeProps> = ({ onCameraReady })
                            const pt = treePositions[i];
                            const d = p.dist(lx, ly, pt.x, pt.y);
                            if (d < searchRadius) {
-                               spawnFlower(pt.x, pt.y, handScreenSizeRatio);
+                               spawnFlower(pt.x, pt.y, handScreenSizeRatio, forceSmall);
                                treePositions.splice(i, 1);
                                break; 
                            }
